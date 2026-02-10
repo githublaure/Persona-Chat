@@ -1,23 +1,11 @@
-import { sql } from "drizzle-orm";
-import { pgTable, serial, integer, text, timestamp, varchar } from "drizzle-orm/pg-core";
+import { pgTable, serial, integer, text, timestamp } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
-
-export const characters = pgTable("characters", {
-  id: serial("id").primaryKey(),
-  name: text("name").notNull(),
-  description: text("description").notNull(),
-  systemPrompt: text("system_prompt").notNull(),
-  avatarColor: varchar("avatar_color", { length: 7 }).notNull().default("#3B82F6"),
-  greeting: text("greeting").notNull().default("Hello! How can I help you today?"),
-  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
-});
+import { sql } from "drizzle-orm";
 
 export const conversations = pgTable("conversations", {
   id: serial("id").primaryKey(),
-  characterId: integer("character_id").notNull().references(() => characters.id, { onDelete: "cascade" }),
   title: text("title").notNull(),
-  lastMessageAt: timestamp("last_message_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 
@@ -29,14 +17,8 @@ export const messages = pgTable("messages", {
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 
-export const insertCharacterSchema = createInsertSchema(characters).omit({
-  id: true,
-  createdAt: true,
-});
-
 export const insertConversationSchema = createInsertSchema(conversations).omit({
   id: true,
-  lastMessageAt: true,
   createdAt: true,
 });
 
@@ -45,9 +27,8 @@ export const insertMessageSchema = createInsertSchema(messages).omit({
   createdAt: true,
 });
 
-export type Character = typeof characters.$inferSelect;
-export type InsertCharacter = z.infer<typeof insertCharacterSchema>;
 export type Conversation = typeof conversations.$inferSelect;
 export type InsertConversation = z.infer<typeof insertConversationSchema>;
 export type Message = typeof messages.$inferSelect;
 export type InsertMessage = z.infer<typeof insertMessageSchema>;
+
