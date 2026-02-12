@@ -17,7 +17,17 @@ export function AuthPanel() {
     mutationFn: async () => {
       const endpoint = mode === "login" ? "/api/auth/login" : "/api/auth/register";
       const res = await apiRequest("POST", endpoint, { username, password });
-      return res.json();
+      const contentType = res.headers.get("content-type") || "";
+      if (contentType.includes("application/json")) {
+        return res.json();
+      }
+
+      const rawBody = await res.text();
+      throw new Error(
+        `Réponse serveur invalide pendant ${mode === "login" ? "la connexion" : "l'inscription"}. ` +
+          `Le serveur a renvoyé un format inattendu.` +
+          (rawBody ? ` Détail: ${rawBody.slice(0, 120)}` : "")
+      );
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/auth/me"] });
