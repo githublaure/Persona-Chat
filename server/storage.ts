@@ -1,8 +1,11 @@
 import { db } from "./db";
 import {
+  users,
   characters,
   conversations,
   messages,
+  type User,
+  type InsertUser,
   type Character,
   type InsertCharacter,
   type Conversation,
@@ -10,28 +13,54 @@ import {
   type Message,
   type InsertMessage,
 } from "@shared/schema";
-import { eq, desc, sql } from "drizzle-orm";
+import { and, eq, desc, isNull, or, sql } from "drizzle-orm";
 
 export interface IStorage {
-  getCharacters(): Promise<Character[]>;
+  getUserById(id: number): Promise<User | undefined>;
+  getUserByUsername(username: string): Promise<User | undefined>;
+  createUser(data: InsertUser): Promise<User>;
+
+  getCharacters(userId: number): Promise<Character[]>;
   getCharacter(id: number): Promise<Character | undefined>;
-  createCharacter(data: InsertCharacter): Promise<Character>;
-  deleteCharacter(id: number): Promise<void>;
+  createCharacter(userId: number, data: InsertCharacter): Promise<Character>;
+  deleteCharacter(userId: number, id: number): Promise<void>;
 
-  getConversations(): Promise<(Conversation & { character?: Character })[]>;
-  getConversation(id: number): Promise<(Conversation & { character: Character; messages: Message[] }) | undefined>;
-  createConversation(data: InsertConversation): Promise<Conversation>;
-  deleteConversation(id: number): Promise<void>;
-  updateConversationTitle(id: number, title: string): Promise<void>;
-  touchConversation(id: number): Promise<void>;
+  getConversations(userId: number): Promise<(Conversation & { character?: Character })[]>;
+  getConversation(
+    userId: number,
+    id: number
+  ): Promise<(Conversation & { character: Character; messages: Message[] }) | undefined>;
+  createConversation(userId: number, data: InsertConversation): Promise<Conversation>;
+  deleteConversation(userId: number, id: number): Promise<void>;
+  updateConversationTitle(userId: number, id: number, title: string): Promise<void>;
+  touchConversation(userId: number, id: number): Promise<void>;
 
-  getMessages(conversationId: number): Promise<Message[]>;
-  createMessage(data: InsertMessage): Promise<Message>;
+  getMessages(userId: number, conversationId: number): Promise<Message[]>;
+  createMessage(userId: number, data: InsertMessage): Promise<Message>;
 }
 
 export class DatabaseStorage implements IStorage {
-  async getCharacters(): Promise<Character[]> {
-    return db.select().from(characters).orderBy(characters.createdAt);
+  async getUserById(id: number): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.id, id));
+    return user;
+  }
+
+  async getUserByUsername(username: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.username, username));
+    return user;
+  }
+
+  async createUser(data: InsertUser): Promise<User> {
+    const [user] = await db.insert(users).values(data).returning();
+    return user;
+  }
+
+  async getCharacters(userId: number): Promise<Character[]> {
+    return db
+      .select()
+      .from(characters)
+      .where(or(isNull(characters.userId), eq(characters.userId, userId)))
+      .orderBy(characters.createdAt);
   }
 
   async getCharacter(id: number): Promise<Character | undefined> {
@@ -39,20 +68,21 @@ export class DatabaseStorage implements IStorage {
     return char;
   }
 
-  async createCharacter(data: InsertCharacter): Promise<Character> {
-    const [char] = await db.insert(characters).values(data).returning();
+  async createCharacter(userId: number, data: InsertCharacter): Promise<Character> {
+    const [char] = await db.insert(characters).values({ ...data, userId }).returning();
     return char;
   }
 
-  async deleteCharacter(id: number): Promise<void> {
-    await db.delete(characters).where(eq(characters.id, id));
+  async deleteCharacter(userId: number, id: number): Promise<void> {
+    await db.delete(characters).where(and(eq(characters.id, id), eq(characters.userId, userId)));
   }
 
-  async getConversations(): Promise<(Conversation & { character?: Character })[]> {
+  async getConversations(userId: number): Promise<(Conversation & { character?: Character })[]> {
     const rows = await db
       .select()
       .from(conversations)
       .leftJoin(characters, eq(conversations.characterId, characters.id))
+      .where(eq(conversations.userId, userId))
       .orderBy(desc(conversations.lastMessageAt));
 
     return rows.map((r) => ({
@@ -62,59 +92,83 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getConversation(
+    userId: number,
     id: number
   ): Promise<(Conversation & { character: Character; messages: Message[] }) | undefined> {
     const [row] = await db
       .select()
       .from(conversations)
       .leftJoin(characters, eq(conversations.characterId, characters.id))
-      .where(eq(conversations.id, id));
+      .where(and(eq(conversations.id, id), eq(conversations.userId, userId)));
 
     if (!row || !row.characters) return undefined;
 
     const msgs = await db
       .select()
       .from(messages)
-      .where(eq(messages.conversationId, id))
+      .innerJoin(conversations, eq(messages.conversationId, conversations.id))
+      .where(and(eq(messages.conversationId, id), eq(conversations.userId, userId)))
       .orderBy(messages.createdAt);
 
     return {
       ...row.conversations,
       character: row.characters,
-      messages: msgs,
+      messages: msgs.map((m) => m.messages),
     };
   }
 
-  async createConversation(data: InsertConversation): Promise<Conversation> {
-    const [conv] = await db.insert(conversations).values(data).returning();
+  async createConversation(userId: number, data: InsertConversation): Promise<Conversation> {
+    const [conv] = await db.insert(conversations).values({ ...data, userId }).returning();
     return conv;
   }
 
-  async deleteConversation(id: number): Promise<void> {
-    await db.delete(messages).where(eq(messages.conversationId, id));
-    await db.delete(conversations).where(eq(conversations.id, id));
+  async deleteConversation(userId: number, id: number): Promise<void> {
+    await db
+      .delete(messages)
+      .where(
+        eq(
+          messages.conversationId,
+          sql`(select id from conversations where id = ${id} and user_id = ${userId})`
+        )
+      );
+    await db.delete(conversations).where(and(eq(conversations.id, id), eq(conversations.userId, userId)));
   }
 
-  async updateConversationTitle(id: number, title: string): Promise<void> {
-    await db.update(conversations).set({ title }).where(eq(conversations.id, id));
+  async updateConversationTitle(userId: number, id: number, title: string): Promise<void> {
+    await db
+      .update(conversations)
+      .set({ title })
+      .where(and(eq(conversations.id, id), eq(conversations.userId, userId)));
   }
 
-  async touchConversation(id: number): Promise<void> {
+  async touchConversation(userId: number, id: number): Promise<void> {
     await db
       .update(conversations)
       .set({ lastMessageAt: sql`CURRENT_TIMESTAMP` })
-      .where(eq(conversations.id, id));
+      .where(and(eq(conversations.id, id), eq(conversations.userId, userId)));
   }
 
-  async getMessages(conversationId: number): Promise<Message[]> {
-    return db
+  async getMessages(userId: number, conversationId: number): Promise<Message[]> {
+    const rows = await db
       .select()
       .from(messages)
-      .where(eq(messages.conversationId, conversationId))
+      .innerJoin(conversations, eq(messages.conversationId, conversations.id))
+      .where(and(eq(messages.conversationId, conversationId), eq(conversations.userId, userId)))
       .orderBy(messages.createdAt);
+
+    return rows.map((r) => r.messages);
   }
 
-  async createMessage(data: InsertMessage): Promise<Message> {
+  async createMessage(userId: number, data: InsertMessage): Promise<Message> {
+    const conv = await db
+      .select({ id: conversations.id })
+      .from(conversations)
+      .where(and(eq(conversations.id, data.conversationId), eq(conversations.userId, userId)));
+
+    if (conv.length === 0) {
+      throw new Error("Conversation not found");
+    }
+
     const [msg] = await db.insert(messages).values(data).returning();
     return msg;
   }
