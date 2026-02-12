@@ -13,16 +13,37 @@ export function AuthPanel() {
   const [password, setPassword] = useState("");
   const { toast } = useToast();
 
+  const normalizedUsername = username.trim();
+
   const authMutation = useMutation({
     mutationFn: async () => {
+      if (mode === "register") {
+        if (normalizedUsername.length < 3 || normalizedUsername.length > 50) {
+          throw new Error("Le pseudo doit contenir entre 3 et 50 caractères.");
+        }
+        if (password.length < 8) {
+          throw new Error("Le mot de passe doit contenir au moins 8 caractères.");
+        }
+      }
+
       const endpoint = mode === "login" ? "/api/auth/login" : "/api/auth/register";
-      const res = await apiRequest("POST", endpoint, { username, password });
+      const res = await apiRequest("POST", endpoint, {
+        username: normalizedUsername,
+        password,
+      });
       const contentType = res.headers.get("content-type") || "";
       if (contentType.includes("application/json")) {
         return res.json();
       }
 
       const rawBody = await res.text();
+      const rawStart = rawBody.slice(0, 400);
+      if (rawStart.includes("/@vite/client") || rawStart.includes("<!DOCTYPE html")) {
+        throw new Error(
+          "Le backend API n'est pas joignable depuis cette page. Vérifie que le serveur Express est démarré (npm run dev) et que /api est bien proxyfié."
+        );
+      }
+
       throw new Error(
         `Réponse serveur invalide pendant ${mode === "login" ? "la connexion" : "l'inscription"}. ` +
           `Le serveur a renvoyé un format inattendu.` +
@@ -61,7 +82,11 @@ export function AuthPanel() {
             <Label htmlFor="password">Mot de passe</Label>
             <Input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
           </div>
-          <Button className="w-full" onClick={() => authMutation.mutate()} disabled={authMutation.isPending}>
+          <Button
+            className="w-full"
+            onClick={() => authMutation.mutate()}
+            disabled={authMutation.isPending || (mode === "register" && (!normalizedUsername || !password))}
+          >
             {mode === "login" ? "Se connecter" : "Créer un compte"}
           </Button>
           <Button variant="ghost" className="w-full" onClick={() => setMode(mode === "login" ? "register" : "login") }>
