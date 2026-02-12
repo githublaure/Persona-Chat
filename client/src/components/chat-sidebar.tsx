@@ -19,7 +19,7 @@ import {
   SidebarTrigger,
 } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
-import { Plus, MessageSquare, Trash2, Search } from "lucide-react";
+import { Plus, MessageSquare, Trash2, Search, LogOut } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
@@ -29,12 +29,16 @@ interface ChatSidebarProps {
   activeConversationId: number | null;
   onSelectConversation: (id: number) => void;
   onNewChat: (characterId: number) => void;
+  currentUsername: string;
+  onLogout: () => void;
 }
 
 export function ChatSidebar({
   activeConversationId,
   onSelectConversation,
   onNewChat,
+  currentUsername,
+  onLogout,
 }: ChatSidebarProps) {
   const [showNewCharacter, setShowNewCharacter] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -229,10 +233,12 @@ export function ChatSidebar({
           </SidebarGroup>
         </SidebarContent>
 
-        <SidebarFooter className="p-3">
-          <p className="text-xs text-muted-foreground text-center">
-            Powered by AI
-          </p>
+        <SidebarFooter className="p-3 space-y-2">
+          <p className="text-xs text-muted-foreground text-center truncate">Connecté : {currentUsername}</p>
+          <Button variant="outline" size="sm" className="w-full" onClick={onLogout}>
+            <LogOut className="h-3.5 w-3.5 mr-1" />
+            Se déconnecter
+          </Button>
         </SidebarFooter>
       </Sidebar>
 

@@ -1,14 +1,20 @@
 import { useState, useCallback } from "react";
-import { useMutation } from "@tanstack/react-query";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { apiRequest, getQueryFn, queryClient } from "@/lib/queryClient";
 import { ChatSidebar } from "@/components/chat-sidebar";
 import { ChatView } from "@/components/chat-view";
 import { EmptyState } from "@/components/empty-state";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { useSidebar } from "@/components/ui/sidebar";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { AuthPanel } from "@/components/auth-panel";
 
-function ChatContent() {
+type CurrentUser = {
+  id: number;
+  username: string;
+};
+
+function ChatContent({ currentUser }: { currentUser: CurrentUser }) {
   const [activeConversationId, setActiveConversationId] = useState<number | null>(null);
   const isMobile = useIsMobile();
   const sidebar = useSidebar();
@@ -24,6 +30,17 @@ function ChatContent() {
       if (isMobile) {
         sidebar.setOpenMobile(false);
       }
+    },
+  });
+
+  const logoutMutation = useMutation({
+    mutationFn: async () => {
+      await apiRequest("POST", "/api/auth/logout");
+    },
+    onSuccess: () => {
+      setActiveConversationId(null);
+      queryClient.clear();
+      queryClient.invalidateQueries({ queryKey: ["/api/auth/me"] });
     },
   });
 
@@ -50,6 +67,8 @@ function ChatContent() {
         activeConversationId={activeConversationId}
         onSelectConversation={handleSelectConversation}
         onNewChat={handleNewChat}
+        currentUsername={currentUser.username}
+        onLogout={() => logoutMutation.mutate()}
       />
       <main className="flex-1 flex flex-col overflow-hidden bg-background">
         {activeConversationId ? (
@@ -63,6 +82,19 @@ function ChatContent() {
 }
 
 export default function ChatPage() {
+  const { data: currentUser, isLoading } = useQuery<CurrentUser | null>({
+    queryKey: ["/api/auth/me"],
+    queryFn: getQueryFn<CurrentUser | null>({ on401: "returnNull" }),
+  });
+
+  if (isLoading) {
+    return <div className="h-screen flex items-center justify-center">Chargement...</div>;
+  }
+
+  if (!currentUser) {
+    return <AuthPanel />;
+  }
+
   const style = {
     "--sidebar-width": "18rem",
     "--sidebar-width-icon": "3rem",
@@ -70,7 +102,7 @@ export default function ChatPage() {
 
   return (
     <SidebarProvider style={style as React.CSSProperties}>
-      <ChatContent />
+      <ChatContent currentUser={currentUser} />
     </SidebarProvider>
   );
 }
